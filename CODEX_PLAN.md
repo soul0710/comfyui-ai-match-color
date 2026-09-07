@@ -39,12 +39,11 @@ và chạy bên trong **ComfyUI thật** (mới chỉ chạy qua venv CPU độc
 
 ### P1 — Đưa lên mức "dùng thật ổn định"
 
-1. **Fallback chain như app gốc: OneFormer → SegFormer → Smart Match.**
-   - Hiện `nodes.py` chỉ chạy đúng model được chọn; nếu model lỗi/OOM sẽ raise.
-   - Thêm try/except trong `AIMatchColorSemantic.run`: nếu `sem.semantic_match`
-     ném lỗi (load/inference/OOM), tự thử `segformer_b2`, rồi rơi về
-     `cc.smart_match`. Ghi cảnh báo rõ ra `print`/log, **không nuốt lỗi im lặng**.
-   - Acceptance: mô phỏng lỗi (model_key rác) vẫn ra ảnh Smart Match, có log.
+1. ~~**Fallback chain như app gốc: model chọn → SegFormer → Smart Match.**~~
+   ✅ **XONG** — `AIMatchColorSemantic.run` giải quyết model ở frame đầu qua
+   `_resolve_model` (probe load/download), fallback `segformer_b2` rồi
+   `cc.smart_match`; lỗi inference/OOM giữa batch cũng bắt và degrade. Có log,
+   không nuốt lỗi. Đã test thật (loader hỏng → Smart Match, không crash).
 
 2. **Kiểm chứng OneFormer thật.**
    - `oneformer_swin_large` dùng `OneFormerProcessor`/
@@ -54,10 +53,12 @@ và chạy bên trong **ComfyUI thật** (mới chỉ chạy qua venv CPU độc
    - Acceptance: script giống `scratchpad/test_semantic_real.py` nhưng model
      `oneformer_swin_large` chạy tới "PASSED".
 
-3. **Giữ alpha & dtype.**
-   - `_to_np` đang cắt về 3 kênh (`[..., :3]`). Nếu Source có alpha (RGBA), cần
-     giữ và ghép lại ở output (ComfyUI tách alpha qua MASK, nhưng nên an toàn).
-   - Acceptance: input 4 kênh không crash; alpha được bảo toàn hoặc tách đúng.
+3. ~~**Giữ alpha & dtype.**~~ ✅ **XONG** — `_to_np` tách alpha (kênh 4) ra và
+   `_to_tensor` ghép lại; input RGBA giữ nguyên alpha ở output. Đã test batch
+   RGBA (B=3) giữ alpha=0.5.
+
+   Còn lại: re-segment Reference mỗi frame đã được sửa — `semantic_match` nhận
+   thêm `ref_group_idx` và node cache cả src/ref (reuse frame giờ ~0.0s).
 
 4. **Chạy trong ComfyUI thật + GPU.**
    - Test trên máy có CUDA: kiểm `_cuda_available()`, VRAM, unload model sau chạy.

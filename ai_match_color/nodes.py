@@ -23,16 +23,26 @@ from . import model_manager as mm
 
 
 def _to_np(image_tensor):
-    """ComfyUI IMAGE tensor -> list of (H,W,3) float32 numpy frames."""
+    """ComfyUI IMAGE tensor -> (rgb_frames, alpha_frames).
+
+    ``rgb_frames`` is a list of ``(H,W,3)`` float32 arrays; ``alpha_frames`` is a
+    matching list of ``(H,W,1)`` arrays, or ``None`` when the input has no alpha.
+    """
     arr = image_tensor.detach().cpu().numpy().astype(np.float32)
     if arr.ndim == 3:
         arr = arr[None, ...]
-    return [np.clip(arr[i][..., :3], 0.0, 1.0) for i in range(arr.shape[0])]
+    rgb = [np.clip(arr[i][..., :3], 0.0, 1.0) for i in range(arr.shape[0])]
+    alpha = None
+    if arr.shape[-1] >= 4:
+        alpha = [np.clip(arr[i][..., 3:4], 0.0, 1.0) for i in range(arr.shape[0])]
+    return rgb, alpha
 
 
-def _to_tensor(frames):
+def _to_tensor(frames, alpha=None):
     import torch
 
+    if alpha is not None:
+        frames = [np.concatenate([f, a], axis=-1) for f, a in zip(frames, alpha)]
     stacked = np.stack(frames, axis=0).astype(np.float32)
     return torch.from_numpy(stacked)
 
@@ -106,8 +116,8 @@ class AIMatchColor:
 
     def run(self, source, reference, method, histogram_space, **kw):
         opts = _collect_opts(kw)
-        src_frames = _to_np(source)
-        ref = _to_np(reference)[0]
+        src_frames, src_alpha = _to_np(source)
+        ref = _to_np(reference)[0][0]
 
         out_frames = []
         for frame in src_frames:
@@ -119,7 +129,7 @@ class AIMatchColor:
                 matched = cc.smart_match(frame, ref)
             out_frames.append(_postprocess(frame, matched, opts))
 
-        return (_to_tensor(out_frames),)
+        return (_to_tensor(out_frames, src_alpha),)
 
 
 # ---------------------------------------------------------------------------
@@ -178,29 +188,71 @@ class AIMatchColorSemantic:
             key: float(kw[f"grp_{key}"]) * float(semantic_strength) for key in sem.GROUPS
         }
 
-        src_frames = _to_np(source)
-        ref = _to_np(reference)[0]
+        src_frames, src_alpha = _to_np(source)
+        ref = _to_np(reference)[0][0]
+
+        # Fallback chain, mirroring the desktop app:
+        #   chosen model -> SegFormer-B2 -> Smart Match (never crashes).
+        model_chain = [model]
+        if model != "segformer_b2":
+            model_chain.append("segformer_b2")
 
         out_frames = []
-        cached_group_idx = None
-        for i, frame in enumerate(src_frames):
-            reuse_idx = cached_group_idx if reuse_first_frame else None
-            # segmentation depends on resolution; only reuse when it matches
-            if reuse_idx is not None and reuse_idx.shape != frame.shape[:2]:
-                reuse_idx = None
-            matched, group_idx = sem.semantic_match(
-                frame,
-                ref,
-                model,
-                group_strengths,
-                max_edge=int(proxy_max_edge),
-                src_group_idx=reuse_idx,
-            )
-            if reuse_first_frame and cached_group_idx is None:
-                cached_group_idx = group_idx
+        cached_src_idx = None
+        cached_ref_idx = None
+        active_model = None  # resolved lazily on the first frame
+
+        for frame in src_frames:
+            if active_model is None:
+                active_model = self._resolve_model(
+                    frame, ref, model_chain, group_strengths, int(proxy_max_edge)
+                )
+
+            if active_model == "__smart__":
+                matched = cc.smart_match(frame, ref)
+            else:
+                # segmentation depends on resolution; drop stale caches
+                s_idx = cached_src_idx if reuse_first_frame else None
+                if s_idx is not None and s_idx.shape != frame.shape[:2]:
+                    s_idx = None
+                try:
+                    matched, s_out, r_out = sem.semantic_match(
+                        frame, ref, active_model, group_strengths,
+                        max_edge=int(proxy_max_edge),
+                        src_group_idx=s_idx, ref_group_idx=cached_ref_idx,
+                    )
+                    if reuse_first_frame:
+                        if cached_src_idx is None:
+                            cached_src_idx = s_out
+                        if cached_ref_idx is None:
+                            cached_ref_idx = r_out
+                except Exception as exc:  # inference/OOM mid-batch -> degrade
+                    print(f"[AI Match Color] Semantic run failed on a frame "
+                          f"({active_model}): {exc}. Falling back to Smart Match.")
+                    active_model = "__smart__"
+                    matched = cc.smart_match(frame, ref)
+
             out_frames.append(_postprocess(frame, matched, opts))
 
-        return (_to_tensor(out_frames),)
+        return (_to_tensor(out_frames, src_alpha),)
+
+    @staticmethod
+    def _resolve_model(frame, ref, model_chain, group_strengths, max_edge):
+        """Ensure a model can be downloaded/loaded; return the first that works,
+        or the ``"__smart__"`` sentinel if all semantic models fail.
+
+        Only model *loading* is probed here (the download/load failure point).
+        Per-frame inference errors (e.g. OOM) are handled by the caller's loop.
+        """
+        for mkey in model_chain:
+            try:
+                sem._load_segmenter(mkey)  # triggers first-run download + load
+                print(f"[AI Match Color] Semantic model in use: {mkey}")
+                return mkey
+            except Exception as exc:
+                print(f"[AI Match Color] Model '{mkey}' unavailable: {exc}")
+        print("[AI Match Color] All semantic models failed; using Smart Match.")
+        return "__smart__"
 
 
 NODE_CLASS_MAPPINGS = {

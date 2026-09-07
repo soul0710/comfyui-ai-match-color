@@ -238,20 +238,21 @@ def semantic_match(
     group_strengths: dict,
     max_edge: int = 1024,
     src_group_idx: np.ndarray | None = None,
+    ref_group_idx: np.ndarray | None = None,
     feather: int = 2,
 ):
     """Apply per-group local colour transfer.
 
-    ``src_group_idx`` may be supplied to reuse a previously computed Source
-    segmentation (first-frame reuse for video / image batches).  Returns
-    ``(matched_rgb, src_group_idx)`` so the caller can cache the map.
+    ``src_group_idx`` / ``ref_group_idx`` may be supplied to reuse previously
+    computed segmentations (first-frame reuse for video / image batches).  The
+    Reference is a single image across a whole batch, so its segmentation only
+    needs to run once.  Returns ``(matched_rgb, src_group_idx, ref_group_idx)``
+    so the caller can cache both maps.
     """
     if src_group_idx is None:
-        src_seg = segment(source, model_key, max_edge)
-        src_group_idx = group_map(src_seg)
-
-    ref_seg = segment(reference, model_key, max_edge)
-    ref_group_idx = group_map(ref_seg)
+        src_group_idx = group_map(segment(source, model_key, max_edge))
+    if ref_group_idx is None:
+        ref_group_idx = group_map(segment(reference, model_key, max_edge))
 
     # base: global smart match for anything without a good local match
     base = cc.smart_match(source, reference)
@@ -277,7 +278,7 @@ def semantic_match(
         m = _feather_mask(s_mask, feather)[..., None]
         out = out * (1.0 - m) + local * m
 
-    return np.clip(out, 0.0, 1.0).astype(np.float32), src_group_idx
+    return np.clip(out, 0.0, 1.0).astype(np.float32), src_group_idx, ref_group_idx
 
 
 def _box_blur_1d(a: np.ndarray, radius: int, axis: int) -> np.ndarray:
