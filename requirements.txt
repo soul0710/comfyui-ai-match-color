@@ -1,0 +1,6 @@
+# numpy and torch ship with ComfyUI; listed for completeness / standalone use.
+numpy
+Pillow
+# Only needed for the Semantic Match node (downloaded model + segmentation):
+transformers>=4.40
+huggingface_hub>=0.23

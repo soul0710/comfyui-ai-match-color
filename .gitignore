@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.DS_Store
+# Downloaded models (fetched on first run into ComfyUI/models/ai_match_color)
+models/

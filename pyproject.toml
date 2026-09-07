@@ -1,0 +1,24 @@
+[project]
+name = "comfyui-ai-match-color"
+description = "Local color transfer / color matching for ComfyUI — maps a Reference image's palette, white balance and tone onto a Source image or batch, including ADE20K semantic per-region matching. Downloads its segmentation model on first run."
+version = "1.0.0"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+dependencies = [
+    "numpy",
+    "Pillow",
+    "transformers>=4.40",
+    "huggingface_hub>=0.23",
+]
+
+[project.urls]
+Repository = "https://github.com/OWNER/comfyui-ai-match-color"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "AI Match Color"
+Icon = ""
+
+[tool.pytest.ini_options]
+addopts = "--import-mode=importlib"
+pythonpath = ["."]
