@@ -93,17 +93,18 @@ def ensure_model(model_key: str) -> str:
         repo_id, name = MODELS[model_key]
         print(f"[AI Match Color] Downloading semantic model: {name} ({repo_id})")
         print(f"[AI Match Color] Destination: {dest}")
+        # NB: don't pass local_dir_use_symlinks — it was removed in
+        # huggingface_hub 1.x (downloading into a local dir already copies real
+        # files). Passing it warns on 1.x and TypeErrors on future versions.
         snapshot_download(
             repo_id=repo_id,
             local_dir=dest,
-            local_dir_use_symlinks=False,
             allow_patterns=[
                 "*.json",
                 "*.txt",
                 "*.bin",
                 "*.safetensors",
                 "*.model",
-                "preprocessor_config.json",
             ],
         )
         print(f"[AI Match Color] Download complete: {name}")
