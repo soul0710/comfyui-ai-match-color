@@ -158,12 +158,14 @@ def _load_segmenter(model_key: str):
     device = "cuda" if _cuda_available() else "cpu"
 
     if model_key == "segformer_b2":
-        from transformers import (
-            SegformerForSemanticSegmentation,
-            SegformerImageProcessor,
-        )
+        from transformers import AutoImageProcessor, SegformerForSemanticSegmentation
 
-        processor = SegformerImageProcessor.from_pretrained(path)
+        # use_fast=False avoids the torchvision-only "fast" processor path
+        # (keeps the dependency footprint to torch + transformers only).
+        try:
+            processor = AutoImageProcessor.from_pretrained(path, use_fast=False)
+        except TypeError:  # very old transformers without use_fast kwarg
+            processor = AutoImageProcessor.from_pretrained(path)
         model = SegformerForSemanticSegmentation.from_pretrained(path)
     elif model_key == "oneformer_swin_large":
         from transformers import OneFormerForUniversalSegmentation, OneFormerProcessor
